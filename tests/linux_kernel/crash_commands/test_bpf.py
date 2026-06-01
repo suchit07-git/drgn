@@ -234,3 +234,96 @@ class TestBpf(CrashCommandTestCase, BpfTestCase):
         cmd = self.check_crash_command("bpf -m 99999999999999999 -s")
         self.assertIn("invalid BPF map ID", cmd.stdout)
         self.assertNotIn("struct bpf_map", cmd.stdout)
+
+    def test_bpf_all_programs(self):
+        with contextlib.ExitStack() as exit_stack:
+            prog_fd = bpf_prog_load(BPF_PROG_TYPE_KPROBE, self.INSNS, b"GPL")
+            exit_stack.callback(os.close, prog_fd)
+
+            prog_info = bpf_prog_get_info_by_fd(prog_fd)
+            prog_id = prog_info.id
+            prog_tag = "".join(f"{b:02x}" for b in prog_info.tag)
+
+            cmd = self.check_crash_command("bpf -P")
+            self.assertRegex(
+                cmd.stdout,
+                rf"(?sm)ID\s+.*BPF_PROG_TYPE.*^\s*{prog_id}\s+.*KPROBE\s+.*{prog_tag}\s*$",
+            )
+            self.assertRegex(
+                cmd.stdout,
+                r"(?sm)^\s*XLATED:\s*\d+\s+JITED:\s*\d+\s+MEMLOCK:\s*\d+",
+            )
+            self.assertRegex(
+                cmd.stdout,
+                r"(?sm)^\s*LOAD_TIME:\s*((\w+\s+){3}\d{2}:\d{2}:\d{2}\s+\d{4}|\(unknown\))",
+            )
+            self.assertRegex(
+                cmd.stdout,
+                r"(?sm)^\s*GPL_COMPATIBLE:\s*(yes|no)\s+NAME:\s*(\(unused\)|\(unknown\)|\S+)\s+UID:\s*\d+",
+            )
+
+    def test_bpf_all_maps(self):
+        with contextlib.ExitStack() as exit_stack:
+            map_fd = bpf_map_create(BPF_MAP_TYPE_HASH, 4, 8, 256)
+            exit_stack.callback(os.close, map_fd)
+
+            map_info = bpf_map_get_info_by_fd(map_fd)
+            map_id = map_info.id
+
+            cmd = self.check_crash_command("bpf -M")
+            self.assertRegex(
+                cmd.stdout,
+                rf"(?sm)ID\s+.*BPF_MAP.*^\s*{map_id}\s+.*HASH\s+",
+            )
+            self.assertRegex(
+                cmd.stdout,
+                r"(?sm)^\s*KEY_SIZE:\s*4\s+VALUE_SIZE:\s*8\s+MAX_ENTRIES:\s*256",
+            )
+            self.assertRegex(
+                cmd.stdout,
+                r"(?sm)NAME:\s*(\(unused\)|\(unknown\)|\"[^\"]*\")\s+UID:\s*(\d+|\(unknown\)|\(unused\))",
+            )
+
+    def test_bpf_all_programs_show_struct(self):
+        with contextlib.ExitStack() as exit_stack:
+            prog_fd = bpf_prog_load(BPF_PROG_TYPE_KPROBE, self.INSNS, b"GPL")
+            exit_stack.callback(os.close, prog_fd)
+
+            cmd = self.check_crash_command("bpf -P -s")
+            self.assertRegex(
+                cmd.stdout,
+                r"(?sm)^\(struct bpf_prog\){",
+            )
+            self.assertRegex(
+                cmd.stdout,
+                r"(?sm)^\(struct bpf_prog_aux\){",
+            )
+
+    def test_bpf_all_maps_show_struct(self):
+        with contextlib.ExitStack() as exit_stack:
+            map_fd = bpf_map_create(BPF_MAP_TYPE_HASH, 4, 8, 256)
+            exit_stack.callback(os.close, map_fd)
+
+            cmd = self.check_crash_command("bpf -M -s")
+            self.assertRegex(
+                cmd.stdout,
+                r"(?sm)^\(struct bpf_map\){",
+            )
+
+    def test_bpf_combined_all_programs_and_maps(self):
+        with contextlib.ExitStack() as exit_stack:
+            prog_fd = bpf_prog_load(BPF_PROG_TYPE_KPROBE, self.INSNS, b"GPL")
+            exit_stack.callback(os.close, prog_fd)
+
+            map_fd = bpf_map_create(BPF_MAP_TYPE_HASH, 4, 8, 256)
+            exit_stack.callback(os.close, map_fd)
+
+            cmd = self.check_crash_command("bpf -P -M -s")
+            self.assertRegex(
+                cmd.stdout,
+                r"(?sm)^\(struct bpf_prog\){",
+            )
+            self.assertRegex(
+                cmd.stdout,
+                r"(?sm)^\(struct bpf_map\){",
+            )
